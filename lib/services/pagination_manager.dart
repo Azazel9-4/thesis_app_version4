@@ -1,5 +1,15 @@
 import 'package:flutter/material.dart';
 
+class CursorPosition {
+  final int pageIndex;
+  final int localPosition;
+
+  const CursorPosition({
+    required this.pageIndex,
+    required this.localPosition,
+  });
+}
+
 class StyledText {
   String text;
   bool bold;
@@ -18,61 +28,160 @@ class StyledText {
     this.fontSize = 14,
     this.fontFamily = 'Arial',
   });
+
+  StyledText copyWith({
+    String? text,
+    bool? bold,
+    bool? italic,
+    bool? underline,
+    double? fontSize,
+    String? fontFamily,
+  }) {
+    return StyledText(
+      text ?? this.text,
+      bold: bold ?? this.bold,
+      italic: italic ?? this.italic,
+      underline: underline ?? this.underline,
+      fontSize: fontSize ?? this.fontSize,
+      fontFamily: fontFamily ?? this.fontFamily,
+    );
+  }
 }
 
 class PaginationManager extends ChangeNotifier {
   String _documentText = '';
-  final List<List<StyledText>> _pages = []; // changed to store StyledText per page
 
-  String get fullText => _documentText;
+  /// Linked container storage
+  final List<List<StyledText>> _pages = [];
+
+  /// Global cursor position (SINGLE SOURCE OF TRUTH)
+  int _globalCursorPosition = 0;
 
   static const int _defaultCharsPerPage = 2500;
-  static const int _pageBuffer = 50; // tolerance before forcing new page
 
   PaginationManager();
 
+  // ==============================
+  // Getters
+  // ==============================
+
+  String get fullText => _documentText;
+  List<List<StyledText>> get pages => List.unmodifiable(_pages);
+  int get globalCursorPosition => _globalCursorPosition;
+
+  // ==============================
+  // Initialization
+  // ==============================
+
   void initialize() {
     _documentText = '';
+    _globalCursorPosition = 0;
+
     _pages
       ..clear()
-      ..add([StyledText('')]); // empty StyledText
+      ..add([StyledText('')]);
+
     notifyListeners();
   }
 
   void loadInitialText(String text) {
     _documentText = text;
+    _globalCursorPosition = 0;
     _paginateDefault();
     notifyListeners();
   }
 
-  /// 🔹 Used by mobile view — updates entire document at once
+  // ==============================
+  // Mobile View Update
+  // ==============================
+
   void updateContent(String newText) {
     _documentText = newText;
+    _globalCursorPosition =
+        _globalCursorPosition.clamp(0, _documentText.length);
+
     _paginateDefault();
     notifyListeners();
   }
 
-  List<List<StyledText>> get pages => List.unmodifiable(_pages);
+  void setGlobalCursorPosition(int position) {
+    _globalCursorPosition = position.clamp(0, _documentText.length);
+    notifyListeners();
+  }
 
-  /// 🔹 Used by PrintView — dynamically handles typing/backspace like MS Word
+  // ==============================
+  // Print View Update (Linked Flow)
+  // ==============================
+
   void updateFromPages(
     List<List<StyledText>> newPages, {
-    int? editingPageIndex,
-    int? cursorPosition,
+    required int editingPageIndex,
+    required int localCursorOffset,
   }) {
-    // Merge all text into one continuous document
+    // Replace pages
+    _pages
+      ..clear()
+      ..addAll(newPages);
+
+    // Rebuild full document from pages
     _documentText = newPages
         .expand((page) => page)
         .map((e) => e.text)
-        .join('\n\n');
+        .join();
 
-    // Recalculate pages so that text flows between them
-    _reflowPages();
+    // Convert local cursor → global cursor
+    _globalCursorPosition =
+        getGlobalFromLocal(editingPageIndex, localCursorOffset);
 
     notifyListeners();
   }
 
-  /// 🔹 Used for initial pagination or when new text is loaded
+  // ==============================
+  // Global ↔ Local Cursor Mapping
+  // ==============================
+
+  CursorPosition getLocalCursorFromGlobal() {
+    int current = 0;
+
+    for (int i = 0; i < _pages.length; i++) {
+      final pageText = _pages[i].map((e) => e.text).join();
+      final length = pageText.length;
+
+      if (_globalCursorPosition <= current + length) {
+        return CursorPosition(
+          pageIndex: i,
+          localPosition: _globalCursorPosition - current,
+        );
+      }
+
+      current += length;
+    }
+
+    // Fallback to last page
+    return CursorPosition(
+      pageIndex: _pages.isEmpty ? 0 : _pages.length - 1,
+      localPosition: _pages.isEmpty
+          ? 0
+          : _pages.last.map((e) => e.text).join().length,
+    );
+  }
+
+  int getGlobalFromLocal(int pageIndex, int localOffset) {
+    if (_pages.isEmpty) return 0;
+
+    int global = 0;
+
+    for (int i = 0; i < pageIndex && i < _pages.length; i++) {
+      global += _pages[i].map((e) => e.text).join().length;
+    }
+
+    return (global + localOffset).clamp(0, _documentText.length);
+  }
+
+  // ==============================
+  // Basic Pagination (Mobile Mode)
+  // ==============================
+
   void _paginateDefault() {
     _pages.clear();
 
@@ -81,59 +190,18 @@ class PaginationManager extends ChangeNotifier {
       return;
     }
 
-    final text = _documentText;
-    for (int i = 0; i < text.length; i += _defaultCharsPerPage) {
-      final end = (i + _defaultCharsPerPage > text.length)
-          ? text.length
+    for (int i = 0; i < _documentText.length; i += _defaultCharsPerPage) {
+      final end = (i + _defaultCharsPerPage > _documentText.length)
+          ? _documentText.length
           : i + _defaultCharsPerPage;
 
-      _pages.add([StyledText(text.substring(i, end).trim())]);
+      _pages.add([
+        StyledText(_documentText.substring(i, end)),
+      ]);
     }
 
-    if (_pages.isEmpty) _pages.add([StyledText('')]);
-  }
-
-  /// 🔹 Smart reflow: Keeps text moving across pages like in Word
-  void _reflowPages() {
-    _pages.clear();
-
-    if (_documentText.isEmpty) {
+    if (_pages.isEmpty) {
       _pages.add([StyledText('')]);
-      return;
-    }
-
-    final text = _documentText;
-    final buffer = StringBuffer();
-    int count = 0;
-
-    for (int i = 0; i < text.length; i++) {
-      buffer.write(text[i]);
-      count++;
-
-      // When we hit the page limit, break into a new page
-      if (count >= _defaultCharsPerPage && i < text.length - 1) {
-        _pages.add([StyledText(buffer.toString().trim())]);
-        buffer.clear();
-        count = 0;
-      }
-    }
-
-    // Add last partial page
-    if (buffer.isNotEmpty) _pages.add([StyledText(buffer.toString().trim())]);
-
-    // Clean up any empty tail pages
-    _cleanupEmptyPages();
-
-    // Always keep one empty page at end for continuous typing
-    if (_pages.isEmpty ||
-        _pages.last.first.text.length > _defaultCharsPerPage - _pageBuffer) {
-      _pages.add([StyledText('')]);
-    }
-  }
-
-  void _cleanupEmptyPages() {
-    while (_pages.length > 1 && _pages.last.first.text.trim().isEmpty) {
-      _pages.removeLast();
     }
   }
 }

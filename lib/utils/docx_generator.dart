@@ -1,11 +1,11 @@
 // docx_generator.dart
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:open_file/open_file.dart';
 import 'package:archive/archive.dart';
 import 'package:html/parser.dart' as html_parser;
 import 'package:html/dom.dart' as dom;
+import '../services/media_scanner_service.dart';
 
 /// Generate a DOCX file from HTML/editor content or plain text
 /// Supports: bold, italic, underline, alignment, font, fontSize, page size
@@ -149,21 +149,15 @@ Future<File?> generateDocx({
     // ------------------------
     // 6️⃣ Save file
     // ------------------------
-    final dir = await getApplicationDocumentsDirectory();
-    final sanitizedFileName = fileName.isEmpty
-        ? "Document_${DateTime.now().millisecondsSinceEpoch}"
-        : fileName;
-    final filePath = '${dir.path}/$sanitizedFileName.docx';
+final file = File(fileName);
+await file.writeAsBytes(docxBytes!);
+await MediaScannerService.scanFile(file.path);
+ScaffoldMessenger.of(context).showSnackBar(
+  SnackBar(content: Text("Saved DOCX successfully")),
+);
 
-    final file = File(filePath);
-    await file.writeAsBytes(docxBytes!);
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text("Saved DOCX at: $filePath")),
-    );
-
-    await OpenFile.open(filePath);
-    return file;
+await OpenFile.open(fileName);
+return file;
   } catch (e) {
     print("Error generating DOCX: $e");
     ScaffoldMessenger.of(context).showSnackBar(

@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'scanner.dart'; // your DocumentScanner
+import 'scanner.dart'; 
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});

@@ -1,8 +1,8 @@
 import 'dart:io';
 import 'package:flutter/material.dart'; // FontWeight, FontStyle, TextAlign
-import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
+import '../services/media_scanner_service.dart';
 
 Future<void> generatePDF({
   required String text,
@@ -59,10 +59,7 @@ Future<void> generatePDF({
     ),
   );
 
-  final dir = await getApplicationDocumentsDirectory();
-  final sanitizedFileName = fileName.isEmpty
-    ? "Document_${DateTime.now().millisecondsSinceEpoch}"
-    : fileName;
-  final file = File("${dir.path}/$sanitizedFileName.pdf");
+  final file = File(fileName);
   await file.writeAsBytes(await pdf.save());
+  await MediaScannerService.scanFile(file.path);
 }

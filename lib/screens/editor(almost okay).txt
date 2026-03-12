@@ -7,7 +7,7 @@ import '../utils/docx_generator.dart';
 import '../utils/pdf_generator.dart';
 import 'dart:io'; // Fixes 'FileSystemEntity'
 import 'package:path_provider/path_provider.dart';
-import 'dart:async';
+
 
 class TextEditorScreen extends StatefulWidget {
   final String? initialText;
@@ -34,25 +34,10 @@ class _TextEditorScreenState extends State<TextEditorScreen> {
   String _fontFamily = 'Arial';
   PaperSize _pageSize = PaperSize.a4;
 
-  String _currentFileName = ""; // Tracks the current document title
-
-  bool _hasUnsavedChanges = false;
-  Timer? _debounceTimer;
-  final FocusNode _titleFocusNode = FocusNode();
-
-@override
+  @override
   void initState() {
     super.initState();
-    
-if (widget.fileName != null && !widget.fileName!.startsWith("Scanned_")) {
-    _currentFileName = widget.fileName!;
-  } else {
-    // If it's a new scan or empty, fetch the next numbered name immediately
-    _setInitialName(); 
-  }
-
     _paginationManager.initialize();
-    
     if (_paginationManager.pages.isEmpty) _paginationManager.loadInitialText('');
 
     if (widget.initialText != null && widget.initialText!.isNotEmpty) {
@@ -67,42 +52,9 @@ if (widget.fileName != null && !widget.fileName!.startsWith("Scanned_")) {
       }
     }
 
-    _paginationManager.addListener(() {
-      if (mounted) {
-        setState(() {
-          _hasUnsavedChanges = true; 
-        });
-        
-        // Restart the timer every time a key is pressed
-        _debounceTimer?.cancel();
-        _debounceTimer = Timer(const Duration(seconds: 2), () {
-          _autoSaveDraft();
-        });
-      }
-    });
+    _paginationManager.addListener(() => setState(() {}));
   }
 
-  void _autoSaveDraft() async {
-    final allText = _paginationManager.fullText;
-    if (allText.isEmpty || !mounted) return;
-
-    if (_currentFileName.isEmpty) {
-      _currentFileName = await _getNewFileName();
-    }
-
-    final Directory dir = await _getSafePath("Drafts", isDraft: true);
-    final file = File("${dir.path}/$_currentFileName.txt");
-    await file.writeAsString(allText);
-
-    // Use setState so the back button logic refreshes
-    if (mounted) {
-      setState(() {
-        _hasUnsavedChanges = false;
-        debugPrint("Auto-save complete for $_currentFileName");
-      });
-    }
-  }
-//------------------------------------------------------------------------------
   String _stripHtmlTags(String html) {
     final tagRegExp = RegExp(r'<[^>]*>', multiLine: true, caseSensitive: false);
     return html.replaceAll(tagRegExp, '').trim();
@@ -125,48 +77,76 @@ if (widget.fileName != null && !widget.fileName!.startsWith("Scanned_")) {
   void _toggleFormattingToolbar() {
     setState(() => _showFormattingToolbar = !_showFormattingToolbar);
   }
-  
-Future<void> _setInitialName() async {
-  String smartName = await _getNewFileName();
-  if (mounted) {
-    setState(() {
-      _currentFileName = smartName;
-    });
-  }
-}
 
-Future<void> _executeSave(String text, String fileName, String format, {bool isDraft = false}) async {
+Future<void> _executeSave(
+    String text,
+    String fileName,
+    String format,
+    {bool isDraft = false}
+) async {
+
+  Navigator.pop(context);
+
+  final name = fileName.trim().isEmpty
+      ? "Untitled"
+      : fileName.trim();
+
   try {
-    final Directory dir = await _getSafePath(format, isDraft: isDraft);
-    
-    // Ensure we aren't overwriting unless it's a draft update
-    String finalName = isDraft ? fileName : await _ensureUniqueName(fileName, ".${format.toLowerCase()}");
+    final Directory dir =
+        await _getSafePath(format, isDraft: isDraft);
 
-    final String fullFilePath = "${dir.path}/$finalName.${format.toLowerCase()}";
+  String cleanName = name
+      .replaceAll(".pdf", "")
+      .replaceAll(".docx", "")
+      .replaceAll(".txt", "");
 
-    if (format == "TXT" || isDraft) {
-      await File(fullFilePath).writeAsString(text);
-    } else if (format == "PDF") {
+  final String fullFilePath =
+      "${dir.path}/$cleanName.${isDraft ? 'txt' : format.toLowerCase()}";
+
+    if (isDraft) {
+      final file = File(fullFilePath);
+      await file.writeAsString(text);
+    }
+    else if (format == "PDF") {
       await generatePDF(
-        text: text, pageSize: _pageSize.name, fontSize: _fontSize,
-        fontWeight: _isBold ? FontWeight.bold : FontWeight.normal,
-        fontStyle: _isItalic ? FontStyle.italic : FontStyle.normal,
-        alignment: _alignment, fileName: fullFilePath,
+        text: text,
+        pageSize: _pageSize.name,
+        fontSize: _fontSize,
+        fontWeight:
+            _isBold ? FontWeight.bold : FontWeight.normal,
+        fontStyle:
+            _isItalic ? FontStyle.italic : FontStyle.normal,
+        alignment: _alignment,
+        fileName: fullFilePath, // ✅ FULL PATH
       );
-    } else if (format == "DOCX") {
+    }
+    else if (format == "DOCX") {
       await generateDocx(
-        text: text, context: context, fontSize: _fontSize.toInt(),
-        fontFamily: _fontFamily, pageSize: _pageSize.name, fileName: fullFilePath,
+        text: text,
+        context: context,
+        fontSize: _fontSize.toInt(),
+        fontFamily: _fontFamily,
+        pageSize: _pageSize.name,
+        fileName: fullFilePath, // ✅ FULL PATH
       );
     }
 
-    if (!isDraft) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Exported as $format successfully!'), backgroundColor: Colors.green),
-      );
-    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Saved Successfully!'),
+        backgroundColor: Colors.green,
+      ),
+    );
+
   } catch (e) {
     debugPrint("Save Error: $e");
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Error: $e'),
+        backgroundColor: Colors.red,
+      ),
+    );
   }
 }
 
@@ -187,19 +167,15 @@ Future<Directory> _getSafePath(String format, {bool isDraft = false}) async {
 }
 
 Future<void> _saveDocument() async {
-  // Capture the current text
-  final allText = _paginationManager.fullText;
+  final allText = _paginationManager.pages
+      .map((page) => page.map((s) => s.text).join('\n'))
+      .join('\n\n');
 
-  // 1. SMART NAME LOGIC: 
-  // If the user already renamed the file or it was auto-saved, use that name.
-  // Otherwise, generate the next "Untitled Document X".
-  if (_currentFileName.isEmpty) {
-    _currentFileName = await _getNewFileName();
-  }
+  // 1. Generate the smart name (Untitled Document X)
+  String smartName = await _getNewFileName();
+  TextEditingController fileNameController = TextEditingController(text: smartName);
 
-  // 2. Sync the Controller with the CURRENT name
-  TextEditingController fileNameController = TextEditingController(text: _currentFileName);
-
+  // 2. Show the slide-up menu
   showModalBottomSheet(
     context: context,
     isScrollControlled: true, 
@@ -208,146 +184,72 @@ Future<void> _saveDocument() async {
     ),
     builder: (context) => Padding(
       padding: EdgeInsets.only(
-        bottom: MediaQuery.of(context).viewInsets.bottom,
+        bottom: MediaQuery.of(context).viewInsets.bottom, // Moves up with keyboard
         left: 20, right: 20, top: 20,
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Text(
-            "Save Document",
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-          ),
+          const Text("Save Document", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           const SizedBox(height: 15),
+          TextField(
+            controller: fileNameController,
+            decoration: const InputDecoration(
+              labelText: 'File Name',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 20),
           Row(
             children: [
               Expanded(
-                child: TextField(
-                  controller: fileNameController,
-                  decoration: const InputDecoration(
-                    labelText: 'File Name',
-                    border: OutlineInputBorder(),
-                  ),
+                child: ElevatedButton.icon(
+                  onPressed: () => _executeSave(allText, fileNameController.text, "DOCX"),
+                  icon: const Icon(Icons.description),
+                  label: const Text("DOCX"),
                 ),
               ),
-              const SizedBox(width: 8),
-              // THE CHECK BUTTON (The "Rename/Apply" Button)
-              IconButton(
-                icon: const Icon(Icons.check, color: Colors.green),
-                onPressed: () async {
-                  final newName = fileNameController.text.trim();
-                  final finalName = newName.isEmpty ? await _getNewFileName() : newName;
-
-                  setState(() {
-                    _currentFileName = finalName; // This updates the AppBar title immediately
-                  });
-
-                  // Perform a one-time save with the new name
-                  await _executeSave(_paginationManager.fullText, finalName, "TXT", isDraft: true);
-                  
-                  Navigator.pop(context);// Close the sheet
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Name Updated & Draft Saved')),
-                  );
-                },
+              const SizedBox(width: 10),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: () => _executeSave(allText, fileNameController.text, "PDF"),
+                  icon: const Icon(Icons.picture_as_pdf),
+                  label: const Text("PDF"),
+                ),
               ),
             ],
           ),
+          const SizedBox(height: 10),
+          // THE "SAVE ONLY" BUTTON
+SizedBox(
+  width: double.infinity,
+  child: MaterialButton(
+    color: Colors.blueGrey.shade900,
+    onPressed: () => _executeSave(allText, fileNameController.text, "PDF", isDraft: true), // Notice isDraft: true
+    child: const Text("Save Only", style: TextStyle(color: Colors.white)),
+  ),
+),
           const SizedBox(height: 20),
-          // Export Buttons (DOCX, PDF, TXT)
-          Row(
-            children: [
-              _buildExportButton("DOCX", allText, fileNameController),
-              const SizedBox(width: 10),
-              _buildExportButton("PDF", allText, fileNameController),
-              const SizedBox(width: 10),
-              _buildExportButton("TXT", allText, fileNameController), // No longer "isFullWidth"
-            ],
-          ),
         ],
       ),
     ),
   );
-}
-
-// Helper to keep the code clean
-Widget _buildExportButton(String format, String text, TextEditingController controller, {bool isFullWidth = false}) {
-  return Expanded(
-    flex: isFullWidth ? 2: 2,
-    child: ElevatedButton(
-      onPressed: () async {
-        final nameToSave = controller.text.trim().isEmpty ? _currentFileName : controller.text.trim();
-        await _executeSave(text, nameToSave, format);
-        Navigator.pop(context); // Close BottomSheet
-        Navigator.pop(context, true); // Go back to Scanner/All Docs
-      },
-      child: Text(format),
-    ),
-  );
-}
-
-Future<bool> _handleBack() async {
-  // 1. If no typing happened, or auto-save already synced to disk, 
-  // just exit immediately (bypasses the popup).
-  if (!_hasUnsavedChanges) {
-    return true; 
-  }
-
-  final String allText = _paginationManager.fullText;
-
-  // 2. Only show dialog if there is actually content AND it hasn't been saved yet.
-  if (allText.trim().isNotEmpty) {
-    final shouldSave = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Save Document?'),
-        content: const Text('Do you want to save your document before exiting?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false), // No
-            child: const Text('No'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true), // Yes
-            child: const Text('Yes'),
-          ),
-        ],
-      ),
-    );
-
-    // 3. If they clicked 'Yes', do the final manual save
-    if (shouldSave ?? false) {
-      final currentName = _currentFileName.isEmpty
-          ? await _getNewFileName()
-          : _currentFileName;
-
-      await _executeSave(allText, currentName, "TXT", isDraft: true);
-    }
-  }
-
-  return true; // Closes the editor
 }
 
 Future<String> _getNewFileName() async {
   try {
-    final Directory dir = await getApplicationDocumentsDirectory();
-    final docEaseDir = Directory("${dir.path}/DocEase");
+    final directory = await getApplicationDocumentsDirectory();
+    final List<FileSystemEntity> files = directory.listSync();
     
-    if (!docEaseDir.existsSync()) return "Untitled Document 1";
-
-    // Get all files in all subfolders
-    final List<FileSystemEntity> entities = docEaseDir.listSync(recursive: true);
     int maxNumber = 0;
-    
-    // Pattern to match "Untitled Document" followed by a number
     final regExp = RegExp(r'Untitled Document (\d+)');
 
-    for (var entity in entities) {
-      final name = entity.path.split(Platform.pathSeparator).last;
+    for (var file in files) {
+      final name = file.path.split('/').last;
       final match = regExp.firstMatch(name);
       if (match != null) {
-        int num = int.parse(match.group(1)!);
-        if (num > maxNumber) maxNumber = num;
+        int currentNum = int.parse(match.group(1)!);
+        if (currentNum > maxNumber) maxNumber = currentNum;
       }
     }
     return "Untitled Document ${maxNumber + 1}";
@@ -355,39 +257,6 @@ Future<String> _getNewFileName() async {
     return "Untitled Document 1";
   }
 }
-
-
-Future<String> _ensureUniqueName(String name, String extension) async {
-  final Directory dir = await getApplicationDocumentsDirectory();
-  String finalName = name;
-  int counter = 1;
-
-  // Check if file exists anywhere in DocEase
-  while (true) {
-    bool exists = false;
-    final docEaseDir = Directory("${dir.path}/DocEase");
-    if (docEaseDir.existsSync()) {
-      final files = docEaseDir.listSync(recursive: true);
-      exists = files.any((f) => f.path.endsWith("$finalName$extension"));
-    }
-
-    if (!exists) break;
-    
-    // If it exists, add (counter)
-    finalName = "$name ($counter)";
-    counter++;
-    
-  }
-  return finalName;
-}
-
-@override
-  void dispose() {
-    _debounceTimer?.cancel();    // Stops the timer so it doesn't crash
-    _paginationManager.dispose();
-    _titleFocusNode.dispose(); // <--- ADD THIS // Cleans up the text manager
-    super.dispose();
-  }
 
   Widget _buildFormattingToolbar() {
     if (!_showFormattingToolbar) return const SizedBox.shrink();
@@ -513,34 +382,16 @@ Future<String> _ensureUniqueName(String name, String extension) async {
 
   @override
   Widget build(BuildContext context) {
-    return WillPopScope(
-      onWillPop: _handleBack,
-      child: Scaffold(
-        backgroundColor: const Color(0xFFF8F9FA),
-        appBar: AppBar(
-                  backgroundColor: const Color(0xFF061F33), // <--- SET YOUR ORIGINAL COLOR HERE
-                  elevation: 0,
-                  title: Container(
-                    constraints: const BoxConstraints(maxWidth: 200), // Limits width
-                    child: TextField(
-                      focusNode: _titleFocusNode,
-                      controller: TextEditingController(text: _currentFileName.isEmpty ? "Untitled Document" : _currentFileName),
-                      style: const TextStyle(fontSize: 18, color: Color.fromARGB(255, 255, 254, 254)),
-                      decoration: const InputDecoration(
-                        border: InputBorder.none, // Makes it look like plain text
-                        hintText: "Untitled Document",
-                      ),
-                      onSubmitted: (newName) {
-                        if (newName.trim().isNotEmpty) {
-                          setState(() => _currentFileName = newName.trim());
-                          _autoSaveDraft(); // Save immediately when 'Enter' is pressed
-                        }
-                      },
-                      onTapOutside: (event) {
-                        _titleFocusNode.unfocus(); // Saves if you click elsewhere
-                      },
-                    ),
-                  ),
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8F9FA),
+      appBar: AppBar(
+        title: Text(
+          _isHTMLView
+              ? 'HTML Preview'
+              : _isPrintView
+                  ? 'Print View'
+                  : 'Mobile View',
+        ),
         actions: [
           
           IconButton(
@@ -611,7 +462,6 @@ Future<String> _ensureUniqueName(String name, String extension) async {
             ),
           ),
         ],
-      ),
       ),
     );
   }

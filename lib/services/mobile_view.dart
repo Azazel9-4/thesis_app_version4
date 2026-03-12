@@ -3,11 +3,7 @@ import 'pagination_manager.dart';
 
 class MobileView extends StatefulWidget {
   final PaginationManager paginationManager;
-
-  // Formatting props
-  final bool isBold;
-  final bool isItalic;
-  final bool isUnderline;
+  final bool isBold, isItalic, isUnderline;
   final TextAlign alignment;
   final double fontSize;
   final String fontFamily;
@@ -29,69 +25,91 @@ class MobileView extends StatefulWidget {
 
 class _MobileViewState extends State<MobileView> {
   late TextEditingController _controller;
+  late FocusNode _focusNode;
 
   @override
   void initState() {
     super.initState();
-    _controller = TextEditingController(text: widget.paginationManager.fullText);
+
+    _controller = TextEditingController(
+        text: widget.paginationManager.fullText);
+
+    _focusNode = FocusNode();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _restoreCursor();
+    });
 
     widget.paginationManager.addListener(() {
-      if (_controller.text != widget.paginationManager.fullText) {
-        _controller.text = widget.paginationManager.fullText;
-        _controller.selection = TextSelection.fromPosition(
-          TextPosition(offset: _controller.text.length),
-        );
+      if (_controller.text !=
+          widget.paginationManager.fullText) {
+        final previous =
+            widget.paginationManager.globalCursorPosition;
+
+        _controller.text =
+            widget.paginationManager.fullText;
+
+        _controller.selection =
+            TextSelection.collapsed(
+                offset: previous.clamp(
+                    0, _controller.text.length));
       }
     });
+  }
+
+  void _restoreCursor() {
+    final pos =
+        widget.paginationManager.globalCursorPosition;
+
+    _focusNode.requestFocus();
+
+    _controller.selection = TextSelection.collapsed(
+        offset: pos.clamp(0, _controller.text.length));
   }
 
   @override
   void dispose() {
     _controller.dispose();
+    _focusNode.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
-      padding: const EdgeInsets.all(16),
-      color: theme.scaffoldBackgroundColor,
+    return Container(
+      color: Colors.white,
       child: TextField(
         controller: _controller,
+        focusNode: _focusNode,
         maxLines: null,
-        keyboardType: TextInputType.multiline,
+        expands: true,
+        onChanged: (value) {
+          widget.paginationManager.updateContent(value);
+
+          widget.paginationManager.setGlobalCursorPosition(
+              _controller.selection.baseOffset);
+        },
         style: TextStyle(
           fontSize: widget.fontSize,
           fontFamily: widget.fontFamily,
-          fontWeight: widget.isBold ? FontWeight.bold : FontWeight.normal,
-          fontStyle: widget.isItalic ? FontStyle.italic : FontStyle.normal,
-          decoration:
-              widget.isUnderline ? TextDecoration.underline : TextDecoration.none,
-          color: Colors.black87,
-          height: 1.6,
+          fontWeight: widget.isBold
+              ? FontWeight.bold
+              : FontWeight.normal,
+          fontStyle: widget.isItalic
+              ? FontStyle.italic
+              : FontStyle.normal,
+          decoration: widget.isUnderline
+              ? TextDecoration.underline
+              : TextDecoration.none,
+          height: 1.5,
+          color: Colors.black,
         ),
         textAlign: widget.alignment,
-        decoration: InputDecoration(
-          hintText: 'Start typing here...',
-          filled: true,
-          fillColor: Colors.white,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(10),
-            borderSide: const BorderSide(color: Colors.black26),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(10),
-            borderSide: const BorderSide(color: Colors.black26),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(10),
-            borderSide: const BorderSide(color: Colors.blueAccent, width: 1.5),
-          ),
-          contentPadding: const EdgeInsets.all(12),
+        decoration: const InputDecoration(
+          border: InputBorder.none,
+          contentPadding:
+              EdgeInsets.fromLTRB(20, 20, 20, 40),
         ),
-        onChanged: (value) => widget.paginationManager.updateContent(value),
       ),
     );
   }

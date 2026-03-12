@@ -1,0 +1,257 @@
+import 'package:flutter/material.dart';
+import 'pagination_manager.dart';
+
+enum PaperSize { a4, short, long }
+
+class PrintView extends StatefulWidget {
+  final PaginationManager paginationManager;
+  final PaperSize paperSize;
+
+  final bool isBold;
+  final bool isItalic;
+  final bool isUnderline;
+  final TextAlign alignment;
+  final double fontSize;
+  final String fontFamily;
+
+  const PrintView({
+    super.key,
+    required this.paginationManager,
+    this.paperSize = PaperSize.a4,
+    required this.isBold,
+    required this.isItalic,
+    required this.isUnderline,
+    required this.alignment,
+    required this.fontSize,
+    required this.fontFamily,
+  });
+
+  @override
+  State<PrintView> createState() => _PrintViewState();
+}
+
+class _PrintViewState extends State<PrintView> {
+  final ScrollController _scrollController = ScrollController();
+  late TextEditingController _controller;
+  late FocusNode _focusNode;
+
+  late Size _pageSize;
+  final double _pageGap = 24; // space between pages (non-editable)
+  final double _margin = 96; // 1-inch margins all sides
+
+  @override
+  void initState() {
+    super.initState();
+    _pageSize = _getPaperSize(widget.paperSize);
+
+    _controller = TextEditingController(text: widget.paginationManager.fullText);
+    _focusNode = FocusNode();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) => _restoreCursor());
+
+    widget.paginationManager.addListener(_syncFromManager);
+  }
+
+  Size _getPaperSize(PaperSize size) {
+    switch (size) {
+      case PaperSize.a4:
+        return const Size(794, 1123);
+      case PaperSize.short:
+        return const Size(816, 1056);
+      case PaperSize.long:
+        return const Size(816, 1248);
+    }
+  }
+
+  void _restoreCursor() {
+    final pos = widget.paginationManager.globalCursorPosition;
+    _focusNode.requestFocus();
+    _controller.selection =
+        TextSelection.collapsed(offset: pos.clamp(0, _controller.text.length));
+  }
+
+  void _syncFromManager() {
+    if (_controller.text != widget.paginationManager.fullText) {
+      final previous = widget.paginationManager.globalCursorPosition;
+      _controller.text = widget.paginationManager.fullText;
+      _controller.selection =
+          TextSelection.collapsed(offset: previous.clamp(0, _controller.text.length));
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _focusNode.dispose();
+    _scrollController.dispose();
+    widget.paginationManager.removeListener(_syncFromManager);
+    super.dispose();
+  }
+
+  double _calculateTextHeight(String text, TextStyle style, double maxWidth) {
+    final tp = TextPainter(
+      text: TextSpan(text: text, style: style),
+      textDirection: TextDirection.ltr,
+      maxLines: null,
+    );
+    tp.layout(maxWidth: maxWidth);
+    return tp.height;
+  }
+
+void _onTextChanged(String value) {
+  final style = TextStyle(
+    fontSize: 12,
+    fontFamily: 'serif',
+    height: 1.15,
+  );
+
+  final maxTextWidth = _pageSize.width - (_margin * 2);
+  final singlePageHeight = _pageSize.height - (_margin * 2);
+
+  final cursorOffset = _controller.selection.baseOffset;
+
+  // Calculate cursor's Y position
+  final cursorY = _calculateTextHeight(
+      _controller.text.substring(0, cursorOffset),
+      style,
+      maxTextWidth);
+
+  // Calculate which page it's on
+  final currentPage = (cursorY / singlePageHeight).floor();
+  final totalPages = ( _calculateTextHeight(value, style, maxTextWidth) / singlePageHeight ).ceil();
+
+  if (currentPage >= totalPages) {
+    // Cursor tried to go into gray space: push it to top of next page
+    final linesToAdd = ((singlePageHeight - (cursorY % singlePageHeight)) / (12 * 1.15)).ceil();
+    final newText = value.substring(0, cursorOffset) +
+        '\n' * linesToAdd +
+        value.substring(cursorOffset);
+    
+    _controller.text = newText;
+    _controller.selection = TextSelection.collapsed(
+      offset: cursorOffset + linesToAdd,
+    );
+  }
+
+  widget.paginationManager.updateContent(_controller.text);
+  widget.paginationManager.setGlobalCursorPosition(_controller.selection.baseOffset);
+
+  setState(() {}); // Force re-render for page recalculation
+}
+
+
+  @override
+  Widget build(BuildContext context) {
+    final style = TextStyle(
+      fontSize: 12, // MS Word default
+      fontFamily: 'serif',
+      fontWeight: widget.isBold ? FontWeight.bold : FontWeight.normal,
+      fontStyle: widget.isItalic ? FontStyle.italic : FontStyle.normal,
+      decoration: widget.isUnderline ? TextDecoration.underline : TextDecoration.none,
+      height: 1.15, // line spacing
+    );
+
+    final maxTextWidth = _pageSize.width - (_margin * 2);
+    final textHeight = _calculateTextHeight(_controller.text, style, maxTextWidth);
+    final singlePageHeight = _pageSize.height - (_margin * 2);
+
+    final numPages = (textHeight / singlePageHeight).ceil().clamp(1, 1000);
+
+    return MediaQuery(
+      data: MediaQuery.of(context).copyWith(textScaleFactor: 1.0),
+      child: Container(
+        color: const Color(0xFFD6D6D6),
+        child: SingleChildScrollView(
+          controller: _scrollController,
+          padding: const EdgeInsets.symmetric(vertical: 24),
+          child: Stack(
+            children: [
+              // Background pages with shadows, headers, and footers
+              Column(
+                children: List.generate(numPages, (index) {
+                  return Stack(
+                    children: [
+                      Container(
+                        width: _pageSize.width,
+                        height: _pageSize.height,
+                        margin: EdgeInsets.only(bottom: _pageGap),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          boxShadow: const [
+                            BoxShadow(
+                              color: Colors.black26,
+                              blurRadius: 4,
+                              offset: Offset(2, 2),
+                            ),
+                          ],
+                        ),
+                      ),
+                      // Header and Footer
+                      Positioned(
+                        top: _margin / 2,
+                        left: _margin,
+                        right: _margin,
+                        child: Text(
+                          'Header',
+                          style: TextStyle(fontSize: 10, color: Colors.grey[700]),
+                        ),
+                      ),
+                      Positioned(
+                        bottom: _margin / 2,
+                        left: _margin,
+                        right: _margin,
+                        child: Text(
+                          'Page ${index + 1}',
+                          style: TextStyle(fontSize: 10, color: Colors.grey[700]),
+                          textAlign: TextAlign.right,
+                        ),
+                      ),
+                    ],
+                  );
+                }),
+              ),
+              // Continuous TextField overlay
+              Padding(
+                padding: EdgeInsets.only(
+                  left: _margin,
+                  right: _margin,
+                  top: _margin,
+                  bottom: _margin,
+                ),
+                child: LayoutBuilder(builder: (context, constraints) {
+                  return TextField(
+                    controller: _controller,
+                    focusNode: _focusNode,
+                    maxLines: null,
+                    scrollPhysics: const BouncingScrollPhysics(),
+                    style: style,
+                    textAlign: widget.alignment,
+                    decoration: const InputDecoration(border: InputBorder.none),
+                    onChanged: _onTextChanged,
+                    keyboardType: TextInputType.multiline,
+                    textInputAction: TextInputAction.newline,
+                    buildCounter: (_, {required currentLength, maxLength, required isFocused}) {
+                      // Ensure cursor never enters gray gap
+                      final cursorY = _calculateTextHeight(
+                          _controller.text.substring(0, _controller.selection.baseOffset),
+                          style,
+                          maxTextWidth);
+                      final currentPage = (cursorY / singlePageHeight).floor();
+                      if (currentPage >= numPages) {
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          _controller.selection =
+                              TextSelection.collapsed(offset: _controller.text.length);
+                        });
+                      }
+                      return null;
+                    },
+                  );
+                }),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

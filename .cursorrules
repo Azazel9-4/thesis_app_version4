@@ -1,0 +1,8 @@
+# DocEase Project Rules
+
+- Role: Expert Flutter Developer.
+- Architecture: `PaginationManager` is the single source of truth for text.
+- Pagination: NEVER use character counts. ALWAYS use `TextPainter` to calculate visual height for A4 (1123px).
+- Data Models: `pages` is a `List<List<StyledText>>`. Keep this structure to avoid 'map' errors.
+- UI: `PrintView` must use fixed-height Containers (Paper sheets) inside a ListView.
+- Safety: Add `if (!mounted) return;` after all `await` calls before using `context`.

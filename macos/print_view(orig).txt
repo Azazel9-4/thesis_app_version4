@@ -160,30 +160,19 @@ class _PrintViewState extends State<PrintView> {
                   keyboardType: TextInputType.multiline,
                   textInputAction: TextInputAction.newline,
                   // Prevent cursor from going into gray space
-buildCounter: (_, {required currentLength, maxLength, required isFocused}) {
-  // 1. Get the offset and handle the -1 case
-  final int offset = _controller.selection.baseOffset;
-  
-  // If offset is -1, the selection is invalid, so we return null early
-  if (offset < 0) return null;
-
-  // 2. Calculate height only with a valid offset
-  final double currentCursorHeight = _calculateTextHeight(
-    _controller.text.substring(0, offset), 
-    style, 
-    maxTextWidth
-  );
-
-  final pageIndex = (currentCursorHeight / singlePageHeight).floor();
-
-  if (pageIndex >= numPages) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _controller.selection = TextSelection.collapsed(
-          offset: _controller.text.length);
-    });
-  }
-  return null;
-
+                  buildCounter: (_, {required currentLength, maxLength, required isFocused}) {
+                    final pageIndex =
+                        (_calculateTextHeight(_controller.text.substring(0, _controller.selection.baseOffset), style, maxTextWidth) /
+                                singlePageHeight)
+                            .floor();
+                    if (pageIndex >= numPages) {
+                      // Move cursor to start of last page
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        _controller.selection = TextSelection.collapsed(
+                            offset: _controller.text.length);
+                      });
+                    }
+                    return null;
                   },
                 );
               }),
